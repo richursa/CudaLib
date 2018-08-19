@@ -42,7 +42,6 @@ __global__ void scatter(int *d_array , int *d_scanArray , int *d_predicateArrry,
     {
         if(d_predicateArrry[index] == 1)
         {
-           // printf(" foundeed at index = %d val = %d\n",index,d_array[index]);
             d_scatteredArray[d_scanArray[index] - 1 +offset ] = d_array[index];
         
         }
