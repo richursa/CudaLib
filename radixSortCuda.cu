@@ -1,6 +1,5 @@
 #include<iostream>
 #include<stdio.h>
-#include "random.h"
 using namespace std;
 __device__ int function(int value , int bit ,int bitset)
 {
@@ -132,7 +131,6 @@ int *compact2(int *d_array,int numberOfElements,int bit)
     d_scanArray = hillisSteeleScanHost(d_predicateArrry,numberOfElements);
     int *d_scatteredArray;
     cudaMalloc((void**)&d_scatteredArray,sizeof(int)*numberOfElements);
-    //cout<<"offset = "<<offset<<"\n";
     scatter<<<1600,500>>>(d_array,d_scanArray,d_predicateArrry,d_scatteredArray, numberOfElements,0);
     cudaMemcpy(&offset,d_scanArray+numberOfElements-1,sizeof(int),cudaMemcpyDeviceToHost);
     predicateDevice<<<1600,500>>>(d_array,d_predicateArrry,numberOfElements,bit,0);
@@ -151,7 +149,6 @@ int *positivenegativesplit(int *d_array,int numberOfElements,int bit,int bitset)
     int *d_scatteredArray;
     cudaMemcpy(&offset,d_scanArray+numberOfElements-1,sizeof(int),cudaMemcpyDeviceToHost);
     cudaMalloc((void**)&d_scatteredArray,sizeof(int)*offset);
-    //cout<<"offset = "<<offset<<"\n";
     scatter<<<1600,500>>>(d_array,d_scanArray,d_predicateArrry,d_scatteredArray, numberOfElements,0);
     return d_scatteredArray;
 }
@@ -180,7 +177,6 @@ int main()
     int numberOfElements;
     cin>>numberOfElements;
     int *h_array  = new int[numberOfElements];
-    //class random a(h_array,numberOfElements);
     for(int i=0;i<numberOfElements;i++)
     {
         cin>>h_array[i];
