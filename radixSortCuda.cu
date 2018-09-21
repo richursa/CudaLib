@@ -119,8 +119,8 @@ void radix(int *h_array , int numberOfElements,int numberOfThreads ,int numberOf
     }
     cudaMemcpy(h_array,d_array,sizeof(int)*numberOfElements,cudaMemcpyDeviceToHost);
 }
-
-
+#include<conio.h>
+#include "random.h"
 int main()
 {
     cout<<"enter the numbre of element";
@@ -138,5 +138,5 @@ int main()
     {
         cout<<h_array[i]<<"\n";
     }
-    
+    getch();
 }
