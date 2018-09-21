@@ -1,39 +1,35 @@
 #include<iostream>
 #include<stdio.h>
 using namespace std;
-__device__ int function(int value , int bit ,int bitset)
-{
-    if(bitset == 1 )
-    {
-        if((value & bit)  != 0)
-        {
-            return 1;
-        }
-        else 
-            return 0;
-    }
-    else
-    {
-        if((value & bit) == 0)
-        {
-            return 1;
-        }
-        else 
-        {
-            return 0;
-        }
-    }
-}
 __global__ void predicateDevice(int *d_array , int *d_predicateArrry , int d_numberOfElements,int bit,int bitset)
 {
     int index = threadIdx.x + blockIdx.x*blockDim.x;
     if(index < d_numberOfElements)
     {
-    
-           d_predicateArrry[index] = function(d_array[index],bit,bitset);
+        if(bitset == 0)
+        {
+            if((d_array[index] & bit) == 0)
+             {
+                d_predicateArrry[index] = 1;
+             }
+             else
+             {
+                d_predicateArrry[index] = 0;
+             }
+        }
+        else
+        {
+            if((d_array[index] & bit) != 0)
+            {
+                d_predicateArrry[index] = 1;
+            }
+            else
+            {
+                d_predicateArrry[index] = 0;
+            }
+        }
     }
 }
-
 __global__ void scatter(int *d_array , int *d_scanArray , int *d_predicateArrry,int * d_scatteredArray ,int d_numberOfElements,int offset)
 {
     int index = threadIdx.x + blockIdx.x * blockDim.x;
@@ -46,6 +42,7 @@ __global__ void scatter(int *d_array , int *d_scanArray , int *d_predicateArrry,
         }
     }
 }
+
 __global__ void hillisSteeleScanDevice(int *d_array , int numberOfElements, int *d_tmpArray,int moveIndex)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
@@ -62,132 +59,84 @@ __global__ void hillisSteeleScanDevice(int *d_array , int numberOfElements, int 
 }
 int* hillisSteeleScanHost(int *d_scanArray,int numberOfElements)
 {
-    
-    
     int *d_tmpArray;
-    int *d_tmpArray1;
-    cudaMalloc(&d_tmpArray1,sizeof(int)*numberOfElements);
     cudaMalloc(&d_tmpArray,sizeof(int)*numberOfElements);
-    cudaMemcpy(d_tmpArray1,d_scanArray,sizeof(int)*numberOfElements,cudaMemcpyDeviceToDevice);
     int j,k=0;
     for(j=1;j<numberOfElements;j= j*2,k++)
     {
         if(k%2 == 0)
         {
-            hillisSteeleScanDevice<<<1600,500>>>(d_tmpArray1,numberOfElements,d_tmpArray, j);
-            cudaDeviceSynchronize();
+            hillisSteeleScanDevice<<<100,256>>>(d_scanArray,numberOfElements,d_tmpArray, j);
         }
         else
         {
-            hillisSteeleScanDevice<<<1600,500>>>(d_tmpArray,numberOfElements,d_tmpArray1, j);
-            cudaDeviceSynchronize();
+            hillisSteeleScanDevice<<<100,256>>>(d_tmpArray,numberOfElements,d_scanArray, j);
         }
     } 
     cudaDeviceSynchronize();
     if(k%2 == 0)
     {
-        
-        return d_tmpArray1;
+        return d_scanArray;
     }
     else
     {
         return d_tmpArray;
     }
 }
-__global__ void print(int *d_predicateArrry,int numberOfElements)
+
+__global__ void getPos(int *d_scanArray , int d_numberOfElements,int *d_lastPos)
 {
-    
-    for(int i=0;i<numberOfElements;i++)
+    *d_lastPos = d_scanArray[d_numberOfElements -1];
+}
+void radix(int *h_array , int numberOfElements,int numberOfThreads ,int numberOfBlocks)
+{
+    int *d_array ;
+    cudaMalloc((void**)&d_array,sizeof(int)*numberOfElements);
+    cudaMemcpy(d_array,h_array,sizeof(int)*numberOfElements,cudaMemcpyHostToDevice);
+    int *d_predicateArrry;
+    cudaMalloc((void**)&d_predicateArrry , sizeof(int)*numberOfElements);
+    int *d_scanArray;
+    cudaMalloc((void**)&d_scanArray,sizeof(int)*numberOfElements);
+    int *d_scatteredArray;
+    cudaMalloc((void**)&d_scatteredArray,sizeof(int)*numberOfElements);
+    int *d_lastPos;
+    cudaMalloc ((void**)&d_lastPos,sizeof(int));
+    int *h_lastPos = new int[1];
+    for(int i=0;i<8*sizeof(int);i++)
     {
-        printf("index = %d value = %d\n",i,d_predicateArrry[i]);
+        predicateDevice<<<numberOfBlocks,numberOfThreads>>>(d_array,d_predicateArrry,numberOfElements,1<<(i),0);
+        cudaMemcpy(d_scanArray,d_predicateArrry,sizeof(int)*numberOfElements,cudaMemcpyDeviceToDevice);
+        d_scanArray = hillisSteeleScanHost(d_scanArray,numberOfElements);
+        scatter<<<numberOfBlocks,numberOfElements>>>(d_array,d_scanArray,d_predicateArrry,d_scatteredArray,numberOfElements,0);
+        getPos<<<1,1>>>(d_scanArray,numberOfElements,d_lastPos);
+        predicateDevice<<<numberOfBlocks,numberOfThreads>>>(d_array,d_predicateArrry,numberOfElements,1<<(i),1);
+        cudaMemcpy(d_scanArray,d_predicateArrry,sizeof(int)*numberOfElements,cudaMemcpyDeviceToDevice);
+        d_scanArray = hillisSteeleScanHost(d_scanArray,numberOfElements);
+        cudaMemcpy(h_lastPos,d_lastPos,sizeof(int),cudaMemcpyDeviceToHost);
+        scatter<<<numberOfBlocks,numberOfThreads>>>(d_array,d_scanArray,d_predicateArrry,d_scatteredArray,numberOfElements,(*h_lastPos));
+        cudaMemcpy(d_array,d_scatteredArray,sizeof(int)*numberOfElements,cudaMemcpyDeviceToDevice);
+
     }
+    cudaMemcpy(h_array,d_array,sizeof(int)*numberOfElements,cudaMemcpyDeviceToHost);
 }
 
-int *compact(int *d_array,int numberOfElements,int bit)
-{   
-    int offset;
-    int *d_predicateArrry;
-    cudaMalloc((void**)&d_predicateArrry,sizeof(int)*numberOfElements);
-    predicateDevice<<<1600,500>>>(d_array,d_predicateArrry,numberOfElements,bit,0);
-    int *d_scanArray;
-    d_scanArray = hillisSteeleScanHost(d_predicateArrry,numberOfElements);
-    int *d_scatteredArray;
-    cudaMalloc((void**)&d_scatteredArray,sizeof(int)*numberOfElements);
-    //cout<<"offset = "<<offset<<"\n";
-    scatter<<<1600,500>>>(d_array,d_scanArray,d_predicateArrry,d_scatteredArray, numberOfElements,0);
-    cudaMemcpy(&offset,d_scanArray+numberOfElements-1,sizeof(int),cudaMemcpyDeviceToHost);
-    predicateDevice<<<1600,500>>>(d_array,d_predicateArrry,numberOfElements,bit,1);
-    d_scanArray = hillisSteeleScanHost(d_predicateArrry,numberOfElements);
-    scatter<<<1600,500>>>(d_array,d_scanArray,d_predicateArrry,d_scatteredArray, numberOfElements,offset);
-    return d_scatteredArray;
-}
-int *compact2(int *d_array,int numberOfElements,int bit)
-{
-    int offset;
-    int *d_predicateArrry;
-    cudaMalloc((void**)&d_predicateArrry,sizeof(int)*numberOfElements);
-    predicateDevice<<<1600,500>>>(d_array,d_predicateArrry,numberOfElements,bit,1);
-    int *d_scanArray;
-    d_scanArray = hillisSteeleScanHost(d_predicateArrry,numberOfElements);
-    int *d_scatteredArray;
-    cudaMalloc((void**)&d_scatteredArray,sizeof(int)*numberOfElements);
-    scatter<<<1600,500>>>(d_array,d_scanArray,d_predicateArrry,d_scatteredArray, numberOfElements,0);
-    cudaMemcpy(&offset,d_scanArray+numberOfElements-1,sizeof(int),cudaMemcpyDeviceToHost);
-    predicateDevice<<<1600,500>>>(d_array,d_predicateArrry,numberOfElements,bit,0);
-    d_scanArray = hillisSteeleScanHost(d_predicateArrry,numberOfElements);
-    scatter<<<1600,500>>>(d_array,d_scanArray,d_predicateArrry,d_scatteredArray, numberOfElements,offset);
-    return d_scatteredArray;
-}
-int offset;
-int *positivenegativesplit(int *d_array,int numberOfElements,int bit,int bitset)
-{   
-    int *d_predicateArrry;
-    cudaMalloc((void**)&d_predicateArrry,sizeof(int)*numberOfElements);
-    predicateDevice<<<1600,500>>>(d_array,d_predicateArrry,numberOfElements,bit,bitset);
-    int *d_scanArray;
-    d_scanArray = hillisSteeleScanHost(d_predicateArrry,numberOfElements);
-    int *d_scatteredArray;
-    cudaMemcpy(&offset,d_scanArray+numberOfElements-1,sizeof(int),cudaMemcpyDeviceToHost);
-    cudaMalloc((void**)&d_scatteredArray,sizeof(int)*offset);
-    scatter<<<1600,500>>>(d_array,d_scanArray,d_predicateArrry,d_scatteredArray, numberOfElements,0);
-    return d_scatteredArray;
-}
-int * radixSort(int *d_array , int numberOfElements)
-{
-    int bit;
-    int *d_negativeArray = positivenegativesplit(d_array,numberOfElements,1L<<31,1);
-    for(int i=0;i<sizeof(int)*8;i++)
-    {
-        bit = 1<<i;
-        d_negativeArray = compact2(d_negativeArray,offset,bit);
-    }
-    int *d_postiveArray = positivenegativesplit(d_array,numberOfElements,1L<<31,0);
-    for(int i=0;i<sizeof(int)*8;i++)
-    {
-        bit = 1<<i;
-        d_postiveArray = compact(d_postiveArray,offset,bit);
-    }
-    cudaMemcpy(d_array,d_negativeArray,sizeof(int)*(numberOfElements-offset),cudaMemcpyDeviceToDevice);
-    cudaMemcpy(d_array+(numberOfElements-offset),d_postiveArray,sizeof(int)*offset,cudaMemcpyDeviceToDevice);
-    return d_array;
-}
+
 int main()
 {
-    cout<<"enter the number of elements \n";
+    cout<<"enter the numbre of element";
     int numberOfElements;
     cin>>numberOfElements;
-    int *h_array  = new int[numberOfElements];
-    for(int i=0;i<numberOfElements;i++)
+    int *h_array = new int[numberOfElements];
+    //class random a(h_array ,numberOfElements);
+    for(int i=numberOfElements-1,k=0;i>=0;i--,k++)
     {
-        cin>>h_array[i];
+        h_array[k] = i;
     }
-    int *d_array;
-    cudaMalloc((void**)&d_array ,sizeof(int)*numberOfElements);
-    cudaMemcpy(d_array,h_array,sizeof(int)*numberOfElements,cudaMemcpyHostToDevice);
-    d_array = radixSort(d_array, numberOfElements);
-    cudaMemcpy(h_array,d_array,sizeof(int)*numberOfElements,cudaMemcpyDeviceToHost);
+    radix(h_array,numberOfElements,256,100);
+    cudaDeviceSynchronize();
     for(int i=0;i<numberOfElements;i++)
     {
         cout<<h_array[i]<<"\n";
     }
+    
 }
