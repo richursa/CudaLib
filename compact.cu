@@ -1,3 +1,4 @@
+// richu shaji abraham
 #include<iostream>
 #include<stdio.h>
 #include "random.h"
